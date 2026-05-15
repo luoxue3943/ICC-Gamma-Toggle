@@ -13,7 +13,14 @@ import pystray
 from PIL import Image, ImageDraw, ImageTk
 
 APP_NAME = "ICC Gamma Toggle"
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icc_toggle_config.json")
+def get_app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+APP_DIR = get_app_dir()
+CONFIG_FILE = os.path.join(APP_DIR, "icc_toggle_config.json")
 DEFAULT_COLOR_DIR = r"C:\Windows\System32\spool\drivers\color"
 
 WM_HOTKEY = 0x0312
