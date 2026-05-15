@@ -1,5 +1,6 @@
 import ctypes
 from ctypes import wintypes
+import atexit
 import json
 import os
 import queue
@@ -9,19 +10,15 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import winreg
 import pystray
 from PIL import Image, ImageDraw, ImageTk
 
 APP_NAME = "ICC Gamma Toggle"
-def get_app_dir():
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-APP_DIR = get_app_dir()
-CONFIG_FILE = os.path.join(APP_DIR, "icc_toggle_config.json")
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icc_toggle_config.json")
 DEFAULT_COLOR_DIR = r"C:\Windows\System32\spool\drivers\color"
+RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
+RUN_REG_NAME = "ICCGammaToggle"
 
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
@@ -52,6 +49,14 @@ VK_MAP = {
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
+ERROR_ALREADY_EXISTS = 183
+SINGLE_INSTANCE_MUTEX = r"Global\ICCGammaToggle_Luoxue3943"
 
 
 class DISPLAY_DEVICEW(ctypes.Structure):
@@ -132,13 +137,14 @@ class ICCToggleApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(APP_NAME)
-        self.root.geometry("760x420")
-        self.root.minsize(720, 390)
+        self.root.geometry("760x520")
+        self.root.minsize(760, 520)
 
         self.icc_path_var = tk.StringVar()
         self.hotkey_text_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="未开启")
         self.minimize_to_tray_var = tk.BooleanVar(value=True)
+        self.startup_var = tk.BooleanVar(value=False)
 
         self.capture_mode = False
         self.enabled = False
@@ -169,6 +175,7 @@ class ICCToggleApp:
         main = tk.Frame(self.root, padx=14, pady=14)
         main.pack(fill="both", expand=True)
         main.columnconfigure(1, weight=1)
+        main.rowconfigure(7, weight=1)
 
         tk.Label(main, text="ICC Gamma Toggle", font=("Segoe UI", 20, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
         tk.Label(
@@ -194,12 +201,22 @@ class ICCToggleApp:
         self.toggle_btn = tk.Button(main, text="手动开启滤镜", height=2, command=self.request_toggle)
         self.toggle_btn.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(18, 12))
 
+        settings_frame = tk.Frame(main)
+        settings_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 12))
+
         tk.Checkbutton(
-            main,
+            settings_frame,
             text="关闭窗口时最小化到系统托盘",
             variable=self.minimize_to_tray_var,
             command=self.save_config_silent,
-        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        ).pack(anchor="w")
+
+        tk.Checkbutton(
+            settings_frame,
+            text="开机自启",
+            variable=self.startup_var,
+            command=self.toggle_startup,
+        ).pack(anchor="w", pady=(4, 0))
 
         tk.Label(main, text="状态：", anchor="w").grid(row=6, column=0, sticky="nw", pady=4)
         tk.Label(main, textvariable=self.status_var, fg="#0078D4", wraplength=610, justify="left").grid(row=6, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=4)
@@ -209,8 +226,20 @@ class ICCToggleApp:
             "点击“设置快捷键”后，按下并松开快捷键完成设置；按 Esc 清空快捷键。\n"
             "注意：如果 ICC 没有 VCGT 表，它不能当滤镜用。关闭滤镜会恢复程序启动时记录的 Gamma Ramp。"
         )
-        tk.Label(main, text=note_text, font=("Segoe UI", 9), fg="#777777", wraplength=700, justify="left").grid(row=7, column=0, columnspan=3, sticky="w", pady=(14, 0))
-
+        tk.Label(
+            main,
+            text=note_text,
+            font=("Segoe UI", 9),
+            fg="#777777",
+            wraplength=700,
+            justify="left",
+        ).grid(
+            row=7,
+            column=0,
+            columnspan=3,
+            sticky="nw",
+            pady=(14, 0),
+        )
         self.root.bind("<KeyRelease>", self.on_key_release)
 
     def load_config(self):
@@ -224,6 +253,7 @@ class ICCToggleApp:
             self.hotkey_mods = int(data.get("hotkey_mods", 0))
             self.hotkey_vk = int(data.get("hotkey_vk", 0))
             self.minimize_to_tray_var.set(bool(data.get("minimize_to_tray", True)))
+            self.startup_var.set(self.is_startup_enabled())
         except Exception:
             pass
 
@@ -240,6 +270,50 @@ class ICCToggleApp:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def get_startup_command(self):
+        if getattr(sys, "frozen", False):
+            return f'"{sys.executable}"'
+
+        python_exe = sys.executable
+
+        # 开机自启时尽量不用 python.exe 黑窗口，用 pythonw.exe
+        if python_exe.lower().endswith("python.exe"):
+            pythonw_exe = python_exe[:-10] + "pythonw.exe"
+            if os.path.exists(pythonw_exe):
+                python_exe = pythonw_exe
+
+        script_path = os.path.abspath(sys.argv[0])
+        return f'"{python_exe}" "{script_path}"'
+
+    def is_startup_enabled(self):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_READ) as key:
+                value, _ = winreg.QueryValueEx(key, RUN_REG_NAME)
+            return bool(value)
+        except FileNotFoundError:
+            return False
+        except Exception:
+            return False
+
+    def set_startup_enabled(self, enabled: bool):
+        startup_command = self.get_startup_command()
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_SET_VALUE) as key:
+                if enabled:
+                    winreg.SetValueEx(key, RUN_REG_NAME, 0, winreg.REG_SZ, startup_command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, RUN_REG_NAME)
+                    except FileNotFoundError:
+                        pass
+        except Exception as e:
+            self.startup_var.set(self.is_startup_enabled())
+            messagebox.showerror(APP_NAME, f"开机自启设置失败：{e}")
+
+    def toggle_startup(self):
+        self.set_startup_enabled(self.startup_var.get())
+        self.status_var.set("开机自启已开启" if self.startup_var.get() else "开机自启已关闭")
 
     def get_primary_display_name(self) -> str:
         i = 0
@@ -603,6 +677,16 @@ def main():
     if sys.platform != "win32":
         print("这个工具目前只支持 Windows。")
         return
+
+    mutex = kernel32.CreateMutexW(None, False, SINGLE_INSTANCE_MUTEX)
+    if not mutex:
+        return
+
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
+        return
+
+    atexit.register(lambda: kernel32.CloseHandle(mutex))
+
     root = tk.Tk()
     ICCToggleApp(root)
     root.mainloop()
