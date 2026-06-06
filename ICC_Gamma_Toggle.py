@@ -639,6 +639,12 @@ class ICCToggleApp:
 
     def quit_app(self, icon=None, item=None):
         self.save_config_silent()
+        if self.enabled:
+            try:
+                self.set_gamma_ramp(self.original_ramp)
+                self.enabled = False
+            except Exception:
+                pass
         try:
             if self.tray_icon:
                 self.tray_icon.stop()

@@ -6,6 +6,10 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D7?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
+**English** | [中文](https://github.com/luoxue3943/ICC-Gamma-Toggle/blob/master/README_zh.md)
+
+---
+
 ICC Gamma Toggle is a lightweight Windows utility that allows you to quickly enable or disable ICC/ICM VCGT gamma profiles using global hotkeys.
 
 Unlike traditional Windows ICC profile switching, this tool directly applies the VCGT gamma table through `SetDeviceGammaRamp`, making it behave more like a real-time display filter toggle.
@@ -51,7 +55,7 @@ pip install pystray pillow
 ### Run
 
 ```bash
-python main.py
+python ICC_Gamma_Toggle.py
 ```
 
 ## ⌨️ Hotkeys
