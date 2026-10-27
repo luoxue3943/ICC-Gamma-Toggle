@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 import winreg
 import pystray
 from PIL import Image, ImageDraw, ImageTk
@@ -19,6 +19,60 @@ CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icc_togg
 DEFAULT_COLOR_DIR = r"C:\Windows\System32\spool\drivers\color"
 RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_REG_NAME = "ICCGammaToggle"
+
+LANGUAGES = {"en": "English", "zh_CN": "简体中文"}
+ZH_CN = {
+    'Disabled': '未开启',
+    'Load VCGT/gamma calibration tables from ICC/ICM profiles and toggle the display gamma ramp. Settings are saved automatically.': '读取 ICC/ICM 中的 VCGT/Gamma 校准表，并通过显卡 Gamma Ramp 切换效果。设置会自动保存。',
+    'ICC file:': 'ICC 文件：',
+    'Browse...': '选择文件',
+    'Hotkey:': '快捷键：',
+    'Set Hotkey': '设置快捷键',
+    'Change Hotkey': '重新设置快捷键',
+    'Enable Filter': '手动开启滤镜',
+    'Disable Filter': '手动关闭滤镜',
+    'Minimize to system tray when closing the window': '关闭窗口时最小化到系统托盘',
+    'Start with Windows': '开机自启',
+    'Status:': '状态：',
+    'Primary display: {display}': '当前主显示器：{display}',
+    'Not detected': '未识别',
+    'Click "Set Hotkey", then press and release a key combination to set it. Press Esc to clear it.': '点击“设置快捷键”后，按下并松开快捷键完成设置；按 Esc 清空快捷键。',
+    'Note: ICC profiles without a VCGT table cannot be used as filters. Disabling the filter restores the gamma ramp captured at startup.': '注意：不含 VCGT 表的 ICC 无法作为滤镜使用。关闭滤镜会恢复程序启动时记录的 Gamma Ramp。',
+    'Failed to change startup settings: {error}': '开机自启设置失败：{error}',
+    'Start with Windows enabled': '开机自启已开启',
+    'Start with Windows disabled': '开机自启已关闭',
+    'Invalid gamma ramp length': 'Gamma Ramp 长度错误',
+    'Could not create a device context for the primary display': '无法创建主显示器 DC',
+    'SetDeviceGammaRamp failed (error code: {code}). HDR, display drivers, Remote Desktop, or exclusive fullscreen games may prevent gamma changes.': 'SetDeviceGammaRamp 失败，错误码：{code}。可能受到 HDR、驱动、远程桌面或游戏独占模式限制。',
+    'No ICC file selected': '未选择 ICC 文件',
+    'The ICC file is too small or corrupted': 'ICC 文件太小或损坏',
+    'This ICC profile has no VCGT/gamma calibration table and cannot be used as a visible filter.': '这个 ICC 没有 VCGT/Gamma 校准表，无法作为可见滤镜开关。',
+    'VCGT data extends beyond the ICC file; the file may be corrupted': 'VCGT 数据超出 ICC 文件范围，文件可能损坏',
+    'The VCGT format is unsupported or corrupted': 'VCGT 格式不支持或损坏',
+    'Only the VCGT table format is currently supported; this ICC profile uses parametric gamma.': '此工具目前只支持 VCGT table 格式；这个 ICC 使用参数化 gamma 格式。',
+    'Unsupported VCGT channel count: {channels}': '不支持的 VCGT 通道数：{channels}',
+    'Too few VCGT samples': 'VCGT 采样点太少',
+    'Unsupported VCGT entry size: {size}': '不支持的 VCGT 单点大小：{size}',
+    'Incomplete VCGT data': 'VCGT 数据不完整',
+    'Processing...': '处理中...',
+    'Switching gamma ramp...': '正在切换 Gamma Ramp...',
+    'Select an ICC/ICM file': '选择 ICC/ICM 文件',
+    'ICC/ICM Profile': 'ICC/ICM 配置文件',
+    'All files': '所有文件',
+    'Press a key combination; Esc to clear...': '请按下快捷键，Esc 清空...',
+    'Waiting for keys...': '等待按键...',
+    'Hotkey cleared': '快捷键已清空',
+    'Use a modifier such as Ctrl, Alt, Shift, or Win with a key to avoid accidental activation.': '请使用 Ctrl、Alt、Shift 或 Win 等修饰键与按键组合，避免误触。',
+    'Hotkey enabled: {hotkey}': '快捷键已启用：{hotkey}',
+    'Failed to register hotkey': '快捷键注册失败',
+    'Failed to register hotkey. It may be in use by another application. Error code: {code}': '快捷键注册失败，可能被其他软件占用。错误码：{code}',
+    'Enabled: {path}': '已开启：{path}',
+    'Disabled: Restored the gamma ramp captured at startup': '已关闭：已恢复启动时的 Gamma Ramp',
+    'Failed to switch gamma ramp': '切换 Gamma Ramp 失败',
+    'Open Window': '打开窗口',
+    'Exit': '退出',
+    'Minimized to system tray. The hotkey is still active.': '程序已最小化到系统托盘，快捷键仍然生效',
+}
 
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
@@ -142,7 +196,11 @@ class ICCToggleApp:
 
         self.icc_path_var = tk.StringVar()
         self.hotkey_text_var = tk.StringVar(value="")
-        self.status_var = tk.StringVar(value="Disabled")
+        self.language = "en"
+        self.language_var = tk.StringVar(value=LANGUAGES[self.language])
+        self.status_message = "Disabled"
+        self.status_values = {}
+        self.status_var = tk.StringVar()
         self.minimize_to_tray_var = tk.BooleanVar(value=True)
         self.startup_var = tk.BooleanVar(value=False)
 
@@ -163,6 +221,7 @@ class ICCToggleApp:
         self.hotkey_thread.start()
 
         self.load_config()
+        self.set_status("Disabled")
         self.set_window_icon()
         self.build_ui()
 
@@ -170,37 +229,86 @@ class ICCToggleApp:
         self.root.after(200, self.try_register_saved_hotkey)
         self.root.after(80, self.process_app_queue)
 
+    def tr(self, text, **values):
+        template = ZH_CN.get(text, text) if self.language == "zh_CN" else text
+        return template.format(**values)
+
+    def set_status(self, text, **values):
+        self.status_message = text
+        self.status_values = values
+        self.status_var.set(self.tr(text, **values))
+
+    def error(self, error_type, text, **values):
+        # Keep message templates until display, so queued errors follow language changes.
+        error = error_type(text.format(**values))
+        error.translation_text = text
+        error.translation_values = values
+        return error
+
+    def format_error(self, error):
+        if hasattr(error, "translation_text"):
+            return self.tr(error.translation_text, **error.translation_values)
+        return str(error)
+
+    def change_language(self, _event=None):
+        selected = self.language_var.get()
+        language = next(
+            (code for code, name in LANGUAGES.items() if name == selected), self.language,
+        )
+        if language == self.language:
+            return
+        self.language = language
+        if self.capture_mode:
+            self.hotkey_text_var.set(self.tr("Press a key combination; Esc to clear..."))
+        self.set_status(self.status_message, **self.status_values)
+        self.main.destroy()
+        self.build_ui()
+        if self.tray_icon:
+            self.tray_icon.update_menu()
+        self.save_config_silent()
+
     def build_ui(self):
         self.root.columnconfigure(0, weight=1)
-        main = tk.Frame(self.root, padx=14, pady=14)
+        self.main = main = tk.Frame(self.root, padx=14, pady=14)
         main.pack(fill="both", expand=True)
         main.columnconfigure(1, weight=1)
         main.rowconfigure(7, weight=1)
 
-        tk.Label(main, text="ICC Gamma Toggle", font=("Segoe UI", 20, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        tk.Label(main, text=APP_NAME, font=("Segoe UI", 20, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
+        self.language_var.set(LANGUAGES[self.language])
+        self.language_selector = ttk.Combobox(
+            main, textvariable=self.language_var, values=tuple(LANGUAGES.values()), state="readonly", width=12,
+        )
+        self.language_selector.grid(row=0, column=2, sticky="e")
+        self.language_selector.bind("<<ComboboxSelected>>", self.change_language)
         tk.Label(
             main,
-            text="Load VCGT/gamma calibration tables from ICC/ICM profiles and toggle the display gamma ramp. Settings are saved automatically.",
+            text=self.tr("Load VCGT/gamma calibration tables from ICC/ICM profiles and toggle the display gamma ramp. Settings are saved automatically."),
             font=("Segoe UI", 10),
             fg="#555555",
             wraplength=700,
             justify="left",
         ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 18))
 
-        tk.Label(main, text="ICC file:", anchor="w").grid(row=2, column=0, sticky="w", pady=6)
+        tk.Label(main, text=self.tr("ICC file:"), anchor="w").grid(row=2, column=0, sticky="w", pady=6)
         entry_file = tk.Entry(main, textvariable=self.icc_path_var)
         entry_file.grid(row=2, column=1, sticky="ew", padx=(8, 8), pady=6)
         entry_file.bind("<FocusOut>", lambda _e: self.save_config_silent())
         entry_file.bind("<Return>", lambda _e: self.save_config_silent())
-        tk.Button(main, text="Browse...", command=self.choose_icc).grid(row=2, column=2, sticky="ew", pady=6)
+        tk.Button(main, text=self.tr("Browse..."), command=self.choose_icc).grid(row=2, column=2, sticky="ew", pady=6)
 
-        tk.Label(main, text="Hotkey:", anchor="w").grid(row=3, column=0, sticky="w", pady=6)
+        tk.Label(main, text=self.tr("Hotkey:"), anchor="w").grid(row=3, column=0, sticky="w", pady=6)
         self.hotkey_entry = tk.Entry(main, textvariable=self.hotkey_text_var, state="readonly")
         self.hotkey_entry.grid(row=3, column=1, sticky="ew", padx=(8, 8), pady=6)
-        self.hotkey_btn = tk.Button(main, text="Set Hotkey", command=self.start_capture_hotkey)
+        hotkey_label = "Waiting for keys..." if self.capture_mode else "Change Hotkey" if self.hotkey_vk else "Set Hotkey"
+        self.hotkey_btn = tk.Button(main, text=self.tr(hotkey_label), command=self.start_capture_hotkey)
         self.hotkey_btn.grid(row=3, column=2, sticky="ew", pady=6)
 
-        self.toggle_btn = tk.Button(main, text="Enable Filter", height=2, command=self.request_toggle)
+        toggle_label = "Processing..." if self.busy else "Disable Filter" if self.enabled else "Enable Filter"
+        self.toggle_btn = tk.Button(
+            main, text=self.tr(toggle_label), state="disabled" if self.busy else "normal",
+            height=2, command=self.request_toggle,
+        )
         self.toggle_btn.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(18, 12))
 
         settings_frame = tk.Frame(main)
@@ -208,26 +316,26 @@ class ICCToggleApp:
 
         tk.Checkbutton(
             settings_frame,
-            text="Minimize to system tray when closing the window",
+            text=self.tr("Minimize to system tray when closing the window"),
             variable=self.minimize_to_tray_var,
             command=self.save_config_silent,
         ).pack(anchor="w")
 
         tk.Checkbutton(
             settings_frame,
-            text="Start with Windows",
+            text=self.tr("Start with Windows"),
             variable=self.startup_var,
             command=self.toggle_startup,
         ).pack(anchor="w", pady=(4, 0))
 
-        tk.Label(main, text="Status:", anchor="w").grid(row=6, column=0, sticky="nw", pady=4)
+        tk.Label(main, text=self.tr("Status:"), anchor="w").grid(row=6, column=0, sticky="nw", pady=4)
         tk.Label(main, textvariable=self.status_var, fg="#0078D4", wraplength=610, justify="left").grid(row=6, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=4)
 
-        note_text = (
-            f"Primary display: {self.display_name or 'Not detected'}\n"
-            'Click "Set Hotkey", then press and release a key combination to set it. Press Esc to clear it.\n'
-            "Note: ICC profiles without a VCGT table cannot be used as filters. Disabling the filter restores the gamma ramp captured at startup."
-        )
+        note_text = "\n".join((
+            self.tr("Primary display: {display}", display=self.display_name or self.tr("Not detected")),
+            self.tr('Click "Set Hotkey", then press and release a key combination to set it. Press Esc to clear it.'),
+            self.tr("Note: ICC profiles without a VCGT table cannot be used as filters. Disabling the filter restores the gamma ramp captured at startup."),
+        ))
         tk.Label(
             main,
             text=note_text,
@@ -250,6 +358,8 @@ class ICCToggleApp:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            language = data.get("language", "en")
+            self.language = language if isinstance(language, str) and language in LANGUAGES else "en"
             self.icc_path_var.set(data.get("icc_path", ""))
             self.hotkey_text_var.set(data.get("hotkey_text", ""))
             self.hotkey_mods = int(data.get("hotkey_mods", 0))
@@ -261,8 +371,9 @@ class ICCToggleApp:
 
     def save_config_silent(self):
         data = {
+            "language": self.language,
             "icc_path": self.icc_path_var.get().strip(),
-            "hotkey_text": self.hotkey_text_var.get().strip(),
+            "hotkey_text": self.hotkey_to_text(self.hotkey_mods, self.hotkey_vk),
             "hotkey_mods": self.hotkey_mods,
             "hotkey_vk": self.hotkey_vk,
             "minimize_to_tray": self.minimize_to_tray_var.get(),
@@ -311,11 +422,11 @@ class ICCToggleApp:
                         pass
         except Exception as e:
             self.startup_var.set(self.is_startup_enabled())
-            messagebox.showerror(APP_NAME, f"Failed to change startup settings: {e}")
+            messagebox.showerror(APP_NAME, self.tr("Failed to change startup settings: {error}", error=self.format_error(e)))
 
     def toggle_startup(self):
         self.set_startup_enabled(self.startup_var.get())
-        self.status_var.set("Start with Windows enabled" if self.startup_var.get() else "Start with Windows disabled")
+        self.set_status("Start with Windows enabled" if self.startup_var.get() else "Start with Windows disabled")
 
     def get_primary_display_name(self) -> str:
         i = 0
@@ -354,16 +465,16 @@ class ICCToggleApp:
 
     def set_gamma_ramp(self, values):
         if len(values) != 256 * 3:
-            raise ValueError("Invalid gamma ramp length")
+            raise self.error(ValueError, "Invalid gamma ramp length")
         ramp = GammaRamp(*[max(0, min(65535, int(v))) for v in values])
         hdc = self.create_display_dc()
         if not hdc:
-            raise RuntimeError("Could not create a device context for the primary display")
+            raise self.error(RuntimeError, "Could not create a device context for the primary display")
         try:
             ok = gdi32.SetDeviceGammaRamp(hdc, ctypes.byref(ramp))
             if not ok:
                 err = ctypes.get_last_error()
-                raise RuntimeError(f"SetDeviceGammaRamp failed (error code: {err}). HDR, display drivers, Remote Desktop, or exclusive fullscreen games may prevent gamma changes.")
+                raise self.error(RuntimeError, "SetDeviceGammaRamp failed (error code: {code}). HDR, display drivers, Remote Desktop, or exclusive fullscreen games may prevent gamma changes.", code=err)
         finally:
             gdi32.DeleteDC(hdc)
 
@@ -373,13 +484,15 @@ class ICCToggleApp:
 
     def parse_icc_vcgt_ramp(self, path: str):
         if not path or not os.path.exists(path):
-            raise FileNotFoundError(path or "No ICC file selected")
+            if path:
+                raise FileNotFoundError(path)
+            raise self.error(FileNotFoundError, "No ICC file selected")
 
         with open(path, "rb") as f:
             data = f.read()
 
         if len(data) < 132:
-            raise ValueError("The ICC file is too small or corrupted")
+            raise self.error(ValueError, "The ICC file is too small or corrupted")
 
         tag_count = struct.unpack_from(">I", data, 128)[0]
         vcgt_offset = None
@@ -396,30 +509,30 @@ class ICCToggleApp:
                 break
 
         if vcgt_offset is None:
-            raise ValueError("This ICC profile has no VCGT/gamma calibration table and cannot be used as a visible filter.")
+            raise self.error(ValueError, "This ICC profile has no VCGT/gamma calibration table and cannot be used as a visible filter.")
         if vcgt_offset + vcgt_size > len(data):
-            raise ValueError("VCGT data extends beyond the ICC file; the file may be corrupted")
+            raise self.error(ValueError, "VCGT data extends beyond the ICC file; the file may be corrupted")
 
         tag = data[vcgt_offset:vcgt_offset + vcgt_size]
         if len(tag) < 18 or tag[:4] != b"vcgt":
-            raise ValueError("The VCGT format is unsupported or corrupted")
+            raise self.error(ValueError, "The VCGT format is unsupported or corrupted")
 
         gamma_type = struct.unpack_from(">I", tag, 8)[0]
         if gamma_type != 0:
-            raise ValueError("Only the VCGT table format is currently supported; this ICC profile uses parametric gamma.")
+            raise self.error(ValueError, "Only the VCGT table format is currently supported; this ICC profile uses parametric gamma.")
 
         channels, entry_count, entry_size = struct.unpack_from(">HHH", tag, 12)
         if channels not in (1, 3):
-            raise ValueError(f"Unsupported VCGT channel count: {channels}")
+            raise self.error(ValueError, "Unsupported VCGT channel count: {channels}", channels=channels)
         if entry_count < 2:
-            raise ValueError("Too few VCGT samples")
+            raise self.error(ValueError, "Too few VCGT samples")
         if entry_size not in (1, 2):
-            raise ValueError(f"Unsupported VCGT entry size: {entry_size}")
+            raise self.error(ValueError, "Unsupported VCGT entry size: {size}", size=entry_size)
 
         data_start = 18
         need = channels * entry_count * entry_size
         if data_start + need > len(tag):
-            raise ValueError("Incomplete VCGT data")
+            raise self.error(ValueError, "Incomplete VCGT data")
 
         curves = []
         p = data_start
@@ -457,28 +570,28 @@ class ICCToggleApp:
         if self.busy:
             return
         self.busy = True
-        self.toggle_btn.config(state="disabled", text="Processing...")
-        self.status_var.set("Switching gamma ramp...")
+        self.toggle_btn.config(state="disabled", text=self.tr("Processing..."))
+        self.set_status("Switching gamma ramp...")
         threading.Thread(target=self.toggle_worker, daemon=True).start()
 
     def toggle_worker(self):
         try:
             if self.enabled:
                 self.set_gamma_ramp(self.original_ramp)
-                self.app_queue.put(("gamma_done", False, "Restored the gamma ramp captured at startup"))
+                self.app_queue.put(("gamma_done", False, None))
             else:
                 path = self.icc_path_var.get().strip()
                 ramp = self.parse_icc_vcgt_ramp(path)
                 self.set_gamma_ramp(ramp)
                 self.app_queue.put(("gamma_done", True, path))
         except Exception as e:
-            self.app_queue.put(("gamma_error", False, str(e)))
+            self.app_queue.put(("gamma_error", False, e))
 
     def choose_icc(self):
         path = filedialog.askopenfilename(
-            title="Select an ICC/ICM file",
+            title=self.tr("Select an ICC/ICM file"),
             initialdir=DEFAULT_COLOR_DIR,
-            filetypes=[("ICC/ICM Profile", "*.icc *.icm"), ("All files", "*.*")],
+            filetypes=[(self.tr("ICC/ICM Profile"), "*.icc *.icm"), (self.tr("All files"), "*.*")],
         )
         if path:
             self.icc_path_var.set(path)
@@ -486,12 +599,12 @@ class ICCToggleApp:
 
     def start_capture_hotkey(self):
         self.capture_mode = True
-        self.hotkey_text_var.set("Press a key combination; Esc to clear...")
-        self.hotkey_btn.config(text="Waiting for keys...")
+        self.hotkey_text_var.set(self.tr("Press a key combination; Esc to clear..."))
+        self.hotkey_btn.config(text=self.tr("Waiting for keys..."))
         self.root.focus_force()
 
     def on_key_release(self, event):
-        if not self.capture_mode:
+        if not self.capture_mode or event.widget == self.language_selector:
             return
         keysym = event.keysym.upper()
         if keysym in ("ESCAPE", "ESC"):
@@ -500,8 +613,8 @@ class ICCToggleApp:
             self.hotkey_mods = 0
             self.hotkey_vk = 0
             self.hotkey_text_var.set("")
-            self.hotkey_btn.config(text="Set Hotkey")
-            self.status_var.set("Hotkey cleared")
+            self.hotkey_btn.config(text=self.tr("Set Hotkey"))
+            self.set_status("Hotkey cleared")
             self.save_config_silent()
             return
 
@@ -510,12 +623,12 @@ class ICCToggleApp:
             return
         mods = self.get_current_modifiers()
         if mods == 0:
-            messagebox.showwarning(APP_NAME, "Use a modifier such as Ctrl, Alt, Shift, or Win with a key to avoid accidental activation.")
+            messagebox.showwarning(APP_NAME, self.tr("Use a modifier such as Ctrl, Alt, Shift, or Win with a key to avoid accidental activation."))
             return
 
         text = "+".join(self.modifier_names(mods) + [self.vk_to_name(vk)])
         self.capture_mode = False
-        self.hotkey_btn.config(text="Change Hotkey")
+        self.hotkey_btn.config(text=self.tr("Change Hotkey"))
         self.hotkey_mods = mods
         self.hotkey_vk = vk
         self.hotkey_text_var.set(text)
@@ -578,22 +691,25 @@ class ICCToggleApp:
                     self.request_toggle()
                 elif event == "hotkey_registered":
                     if ok:
-                        self.status_var.set(f"Hotkey enabled: {self.hotkey_to_text(self.hotkey_mods, self.hotkey_vk)}")
+                        self.set_status("Hotkey enabled: {hotkey}", hotkey=self.hotkey_to_text(self.hotkey_mods, self.hotkey_vk))
                     else:
-                        self.status_var.set("Failed to register hotkey")
-                        messagebox.showerror(APP_NAME, f"Failed to register hotkey. It may be in use by another application. Error code: {value}")
+                        self.set_status("Failed to register hotkey")
+                        messagebox.showerror(APP_NAME, self.tr("Failed to register hotkey. It may be in use by another application. Error code: {code}", code=value))
                 elif event == "hotkey_cleared":
-                    self.status_var.set("Hotkey cleared")
+                    self.set_status("Hotkey cleared")
                 elif event == "gamma_done":
                     self.enabled = bool(ok)
                     self.busy = False
-                    self.toggle_btn.config(state="normal", text="Disable Filter" if self.enabled else "Enable Filter")
-                    self.status_var.set(("Enabled: " if self.enabled else "Disabled: ") + str(value))
+                    self.toggle_btn.config(state="normal", text=self.tr("Disable Filter" if self.enabled else "Enable Filter"))
+                    if self.enabled:
+                        self.set_status("Enabled: {path}", path=value)
+                    else:
+                        self.set_status("Disabled: Restored the gamma ramp captured at startup")
                 elif event == "gamma_error":
                     self.busy = False
-                    self.toggle_btn.config(state="normal", text="Disable Filter" if self.enabled else "Enable Filter")
-                    self.status_var.set("Failed to switch gamma ramp")
-                    messagebox.showerror(APP_NAME, str(value))
+                    self.toggle_btn.config(state="normal", text=self.tr("Disable Filter" if self.enabled else "Enable Filter"))
+                    self.set_status("Failed to switch gamma ramp")
+                    messagebox.showerror(APP_NAME, self.format_error(value))
         except queue.Empty:
             pass
         self.root.after(80, self.process_app_queue)
@@ -659,9 +775,9 @@ class ICCToggleApp:
             return
 
         menu = pystray.Menu(
-            pystray.MenuItem("Open Window", self.show_window, default=True, visible=False),
-            pystray.MenuItem(lambda _item: "Disable Filter" if self.enabled else "Enable Filter", self.tray_toggle_filter),
-            pystray.MenuItem("Exit", self.quit_app),
+            pystray.MenuItem(lambda _item: self.tr("Open Window"), self.show_window, default=True, visible=False),
+            pystray.MenuItem(lambda _item: self.tr("Disable Filter" if self.enabled else "Enable Filter"), self.tray_toggle_filter),
+            pystray.MenuItem(lambda _item: self.tr("Exit"), self.quit_app),
         )
         self.tray_icon = pystray.Icon("icc_toggle", self.create_tray_image(), APP_NAME, menu)
 
@@ -671,7 +787,7 @@ class ICCToggleApp:
     def hide_to_tray(self):
         self.ensure_tray()
         self.root.withdraw()
-        self.status_var.set("Minimized to system tray. The hotkey is still active.")
+        self.set_status("Minimized to system tray. The hotkey is still active.")
 
     def handle_window_close(self):
         self.save_config_silent()
