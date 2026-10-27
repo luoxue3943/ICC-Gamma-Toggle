@@ -20,7 +20,8 @@ DEFAULT_COLOR_DIR = r"C:\Windows\System32\spool\drivers\color"
 RUN_REG_PATH = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_REG_NAME = "ICCGammaToggle"
 
-LANGUAGES = {"en": "English", "zh_CN": "简体中文"}
+DEFAULT_LANGUAGE = "zh_CN"
+LANGUAGES = {"zh_CN": "简体中文", "en": "English"}
 ZH_CN = {
     'Disabled': '未开启',
     'Load VCGT/gamma calibration tables from ICC/ICM profiles and toggle the display gamma ramp. Settings are saved automatically.': '读取 ICC/ICM 中的 VCGT/Gamma 校准表，并通过显卡 Gamma Ramp 切换效果。设置会自动保存。',
@@ -73,6 +74,43 @@ ZH_CN = {
     'Exit': '退出',
     'Minimized to system tray. The hotkey is still active.': '程序已最小化到系统托盘，快捷键仍然生效',
 }
+
+# MynaUI globe icon, discovered at https://yesicon.app/mynaui/globe
+# Source: https://github.com/praveenjuge/mynaui-icons/blob/579977f9afb1991c24a32da73417a9cbcc4d5b22/icons/globe.svg
+# Rendered from the original SVG as a transparent 20x20 PNG in #555555.
+# Keep this complete third-party notice with source and binary distributions.
+MYNAUI_GLOBE_LICENSE = """MIT License
+
+Copyright (c) Praveen Juge
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+LANGUAGE_GLOBE_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAACXBIWXMAAA7EAAAOxAGVKw4bAAABkklEQVR4nL2U"
+    "PUsDQRCGYxNBBS20UREiFhZiY20nB1HvyOUSUFMLWtr6K6ys/BXaiIqCCoL/wK9CBA1oIfithT6v7MHmvCRn/Bh4"
+    "mZ3dnXdnZ2Y3lfpvyWazzcVisc8g3ShPU6FQmAI7kLyCdwH7Gb0ZBEEuMRMOPeAA53twyfgWeILm0FfgSYe5rttZ"
+    "kyyfz/ey8QLs4jSAviGaOeuweVBmbhB9yPoZuqvqNVncB3smb4rowXGcVouwTdGBCaJrESnYiGXDuaR8oUfRGbBi"
+    "Is1EoEOXNSbSMfa8oYM4wq0w+d8FvqvRQqTNSTmkQ8A+xl4I7RCaY+3I2ldSaioI2dRvTstYEV/HtQdz0+w7t+xh"
+    "+VZU/NcJdWVTkFKYfLUEWIwWRXPgNLQhnFV//m1RTJQz6jHf94eUbLWGDokWhblt1pbMnhHwAvwvhKlIY3MVt1pj"
+    "szZet7ElenpKeNKnB05qPb1P8TyvW58DeDQfQfRzKOuaunrdz8EWPSec1nVtqwB32GtgMjFRnJgCtP+IpFH5AHXE"
+    "RcaY1bDnAAAAAElFTkSuQmCC"
+)
 
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
@@ -196,7 +234,7 @@ class ICCToggleApp:
 
         self.icc_path_var = tk.StringVar()
         self.hotkey_text_var = tk.StringVar(value="")
-        self.language = "en"
+        self.language = DEFAULT_LANGUAGE
         self.language_var = tk.StringVar(value=LANGUAGES[self.language])
         self.status_message = "Disabled"
         self.status_values = {}
@@ -276,10 +314,14 @@ class ICCToggleApp:
 
         tk.Label(main, text=APP_NAME, font=("Segoe UI", 20, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
         self.language_var.set(LANGUAGES[self.language])
+        language_frame = tk.Frame(main)
+        language_frame.grid(row=0, column=2, sticky="e")
+        self.language_icon_photo = tk.PhotoImage(data=LANGUAGE_GLOBE_PNG)
+        tk.Label(language_frame, image=self.language_icon_photo).pack(side="left", padx=(0, 6))
         self.language_selector = ttk.Combobox(
-            main, textvariable=self.language_var, values=tuple(LANGUAGES.values()), state="readonly", width=12,
+            language_frame, textvariable=self.language_var, values=tuple(LANGUAGES.values()), state="readonly", width=12,
         )
-        self.language_selector.grid(row=0, column=2, sticky="e")
+        self.language_selector.pack(side="left")
         self.language_selector.bind("<<ComboboxSelected>>", self.change_language)
         tk.Label(
             main,
@@ -358,8 +400,8 @@ class ICCToggleApp:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            language = data.get("language", "en")
-            self.language = language if isinstance(language, str) and language in LANGUAGES else "en"
+            language = data.get("language", DEFAULT_LANGUAGE)
+            self.language = language if isinstance(language, str) and language in LANGUAGES else DEFAULT_LANGUAGE
             self.icc_path_var.set(data.get("icc_path", ""))
             self.hotkey_text_var.set(data.get("hotkey_text", ""))
             self.hotkey_mods = int(data.get("hotkey_mods", 0))
